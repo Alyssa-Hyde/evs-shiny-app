@@ -1,0 +1,128 @@
+---
+title: "EVS Data Explorer — Report"
+date: "`r Sys.Date()`"
+output: html_document
+params:
+  country:       "Overall"
+  outcome:       "v72"
+  outcome_label: "Child suffers when mother works"
+  controls:      !r NULL
+  poly_age:      1
+  formula_str:   "v72 ~ age"
+  data:          !r NULL
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+
+library(ggplot2)
+library(dplyr)
+library(broom)
+library(knitr)
+library(gridExtra)
+
+# Use Shiny data if available, otherwise load from file
+if (!is.null(params$data)) {
+  dat <- params$data
+} else {
+  dat <- readRDS("data/evs_clean.rds")
+}
+
+country_label <- params$country
+outcome_label <- params$outcome_label
+```
+
+## Overview
+
+This report was generated from the **EVS Data Explorer** Shiny app.  
+It summarises results for the selections below.
+
+| Parameter | Value |
+|-----------|-------|
+| Country | `r country_label` |
+| Outcome | `r outcome_label` |
+| Additional controls | `r if (is.null(params$controls) || length(params$controls) == 0) "None" else paste(params$controls, collapse = ", ")` |
+| Age polynomial degree | `r params$poly_age` |
+| Model formula | `r params$formula_str` |
+
+---
+
+## Exploration
+
+### Outcome: `r outcome_label`
+
+```{r plot-outcome, fig.height=3}
+ggplot(dat, aes(x = .data[[params$outcome]])) +
+  geom_histogram(bins = 4, fill = "#2c7bb6", colour = "white") +
+  scale_x_continuous(breaks = 1:4) +
+  labs(title = outcome_label, x = "Response (1–4)", y = "Count") +
+  theme_minimal(base_size = 13)
+```
+
+### Control variables
+
+```{r plot-controls, fig.height=3, fig.width=10}
+p_age <- ggplot(dat, aes(x = age)) +
+  geom_histogram(bins = 30, fill = "#1a9641", colour = "white") +
+  labs(title = "Age", x = "Age", y = "Count") +
+  theme_minimal(base_size = 12)
+
+p_edu <- ggplot(dat, aes(x = edu)) +
+  geom_bar(fill = "#d7191c") +
+  labs(title = "Education", x = "Level", y = "Count") +
+  theme_minimal(base_size = 12)
+
+p_sex <- ggplot(dat, aes(x = sex)) +
+  geom_bar(fill = "#fdae61") +
+  labs(title = "Sex", x = "Sex", y = "Count") +
+  theme_minimal(base_size = 12)
+
+gridExtra::grid.arrange(p_age, p_edu, p_sex, ncol = 3)
+```
+
+---
+
+## Regression
+
+**Formula:** `r params$formula_str`
+
+```{r regression}
+fit <- lm(as.formula(params$formula_str), data = dat)
+```
+
+### Coefficients
+
+```{r coef-table}
+tidy(fit, conf.int = TRUE) |>
+  mutate(across(where(is.numeric), \(x) round(x, 4))) |>
+  rename(
+    Term = term,
+    Estimate = estimate,
+    `Std. Error` = std.error,
+    Statistic = statistic,
+    `p-value` = p.value,
+    `CI low` = conf.low,
+    `CI high` = conf.high
+  ) |>
+  kable()
+```
+
+### Predicted values vs. Residuals
+
+```{r resid-plot, fig.height=4}
+df_resid <- data.frame(
+  fitted    = fitted(fit),
+  residuals = residuals(fit)
+)
+
+ggplot(df_resid, aes(x = fitted, y = residuals)) +
+  geom_point(alpha = 0.3, colour = "#2c7bb6") +
+  geom_hline(yintercept = 0, linetype = "dashed", colour = "red") +
+  geom_smooth(method = "loess", se = FALSE, colour = "#d7191c") +
+  labs(
+    title = "Predicted vs. Residuals",
+    x = "Fitted values",
+    y = "Residuals"
+  ) +
+  theme_minimal(base_size = 13)
+```
